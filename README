@@ -1,0 +1,13 @@
+irsel: Information Retrieval axiom SELection
+============================================
+
+To set up on a Linux system with Python 3, install some additional dependencies:
+python3 -m pip install gavel
+
+Then run as follows:
+./irsel.sh <tptp problem file>
+
+On a Windows machine, install WSL-Ubuntu, install the dependencies in wsl.exe and run in cmd.exe:
+irsel <tptp problem file>
+
+(Possibly edit ~/.local/lib/python3.6/site-packages/gavel/dialects/tptp/compiler.py according to https://github.com/MGlauer/python-gavel/pull/1.)
