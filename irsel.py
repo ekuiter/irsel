@@ -18,7 +18,6 @@ from gavel.logic.proof import Proof
 
 from gensim.corpora import Dictionary, MmCorpus
 from gensim.models import TfidfModel, LsiModel
-from gensim.models.coherencemodel import CoherenceModel
 
 class Timer:
     """Measures elapsed time."""
@@ -33,6 +32,7 @@ class Timer:
         return str(timedelta(seconds=self()))
 
     def __enter__(self):
+        self.start_time = default_timer()
         return self
 
     def __exit__(self, type, value, traceback):
