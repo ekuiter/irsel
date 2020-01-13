@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 
 from typing import List, Tuple, Iterable
-from logging import basicConfig
+from logging import basicConfig, INFO
 from argparse import ArgumentParser
 from subprocess import CalledProcessError
 from timeit import default_timer
 from datetime import timedelta
+from itertools import tee, takewhile
 
 from gavel.dialects.base.parser import ProblemParser
 from gavel.dialects.tptp.parser import TPTPProblemParser
@@ -18,6 +19,11 @@ from gavel.logic.proof import Proof
 
 from gensim.corpora import Dictionary, MmCorpus
 from gensim.models import TfidfModel, LsiModel
+from gensim.similarities import Similarity
+from gensim.test.utils import get_tmpfile
+from gensim.matutils import corpus2dense
+
+VERBOSE = False
 
 class Timer:
     """Measures elapsed time."""
@@ -77,6 +83,17 @@ class Irsel(Selector):
         # https://radimrehurek.com/gensim/auto_examples/core/run_corpora_and_vector_spaces.html#corpus-streaming-tutorial.
         return (self.tokenize_formula(premise) for premise in problem.premises)
 
+    def persist_corpus(self, corpus: Corpus, key: str) -> Corpus:
+        """Takes a transient corpus generator and persists it on disk. Only necessary when using a corpus more than once."""
+        with Message(f"Storing {key} corpus"):
+            f = get_tmpfile(f"irsel_{key}")
+            # By serializing a corpus to disk, we can read it multiple times (which is impossible with a generator)
+            # without having to load it into RAM as a whole at any time.
+            MmCorpus.serialize(f, corpus)
+            corpus = MmCorpus(f) # this instance can be consumed as often as we want
+        print(corpus)
+        return corpus
+
     def prepare_corpus(self, problem: Problem) -> Tuple[Dictionary, Corpus]:
         """Prepares a corpus from the premises of a given problem."""
 
@@ -90,18 +107,8 @@ class Irsel(Selector):
             # In other words, this builds a sparse term-document matrix (additionally, it is lazy due to generators).
             corpus = (dictionary.doc2bow(premise) for premise in self.tokenize_premises(problem))
 
-        return dictionary, corpus # the corpus can only be consumed once!
-
-    def persist_corpus(self, corpus: Corpus, key: str) -> Corpus:
-        """Takes a transient corpus generator and persists it on disk. Only necessary when using a corpus more than once."""
-        with Message(f"Storing {key} corpus"):
-            f = f"corpus_{key}.mm"
-            # By serializing a corpus to disk, we can read it multiple times (which is impossible with a generator)
-            # without having to load it into RAM as a whole at any time.
-            MmCorpus.serialize(f, corpus)
-            corpus = MmCorpus(f) # this instance can be consumed as often as we want
-            print(corpus)
-            return corpus
+        corpus = self.persist_corpus(corpus, key="corpus") # make the corpus instance reusable
+        return dictionary, corpus
 
     def select(self, problem: Problem) -> Problem:
         """For a given problem with premises Ax and conjecture C, returns a reduced problem with
@@ -113,7 +120,6 @@ class Irsel(Selector):
         # - corpus = premises        (that is, the corpus or term-document matrix represents the ontology)
 
         dictionary, corpus = self.prepare_corpus(problem) # create a term-document matrix
-        # corpus = self.persist_corpus(corpus, key="raw") # use this to make the corpus instance reusable
 
         with Message("Initializing TF-IDF model"):
             # Transforms term-document matrix with integer entries tf(i,j) (term i in document j) to a TF-IDF matrix
@@ -129,11 +135,46 @@ class Irsel(Selector):
 
         with Message("Initializing LSI model"):
             # Apply latent semantic indexing (that is, a singular value decomposition on the TF-IDF matrix) to discover
-            # "topics" or clusters of co-occuring symbols.
-            lsi_model = LsiModel(tfidf_corpus, id2word=dictionary) # TODO: num_topics 200-500?
+            # "topics" or clusters of co-occuring symbols. Reduces dimensions to num_topics with low-rank approximation.
+            lsi_model = LsiModel(tfidf_corpus, id2word=dictionary, num_topics=200) # TODO: num_topics 200-500? (default 200)
         print(lsi_model)
 
-        return Problem(premises=[], conjecture=problem.conjecture) # TODO
+        with Message("Applying LSI model"):
+            # Transform X = tfidf_corpus from TF-IDF to LSI space. For X = U*S*V^T, this computes U^-1*X = V*S.
+            # This reduces dimensions and "squishes" similar "topics"/related symbols into the same dimension.
+            lsi_corpus = lsi_model[tfidf_corpus]
+
+        if VERBOSE:
+            U = lsi_model.projection.u # relates terms (rows) to topics (columns)
+            S = lsi_model.projection.s # ranks relevance of topics
+            V = corpus2dense(lsi_corpus, len(S)).T / S # relates documents (rows) to topics (vectors)
+            print(f"U = {U.shape}, S = {S.shape}, V = {V.shape}")
+            print(S)
+
+        with Message("Storing index"):
+            # Builds an index which we can compare queries against.
+            index = Similarity(get_tmpfile(f"irsel_index"), lsi_corpus, num_features=len(dictionary))
+        print(index)
+
+        # TODO
+        with Message("Querying for conjecture"):
+            tokenized_conjecture = self.tokenize_formula(problem.conjecture)
+            query = lsi_model[tfidf_model[dictionary.doc2bow(tokenized_conjecture)]]
+            similarities = index[query]
+            ranked_similarities = sorted(enumerate(similarities), key=lambda item: -item[1])
+            top_matches = map(lambda elem: (problem.premises[elem[0]], elem[1]),
+                map(lambda elem: elem[1],
+                # arbitrary stop condition
+                takewhile(lambda elem: elem[0] < 20 and elem[1][1] >= 1e-10, enumerate(ranked_similarities))))
+        # possibly iterate?
+
+        if VERBOSE:
+            print("Selected axioms:")
+            top_matches, top_matches_tmp = tee(top_matches)
+            for premise, score in top_matches_tmp:
+                print(f"{score}\t{premise.formula}")
+
+        return Problem(premises=list(map(lambda elem: elem[0], top_matches)), conjecture=problem.conjecture) # TODO
 
 class Main:
     def parse(self, parser: ProblemParser, filename: str) -> Problem:
@@ -162,11 +203,15 @@ class Main:
             return proof, selection_timer, proof_timer, premise_num, reduced_premise_num
 
     def __init__(self):
-        # logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
         parser = ArgumentParser("irsel")
         parser.add_argument("problem_file", help="TPTP problem file")
         parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
+        parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
         args = parser.parse_args()
+        if args.verbose:
+            global VERBOSE
+            VERBOSE = True
+            basicConfig(format="%(levelname)s: %(message)s", level=INFO)
 
         selector_map = {"identity": Selector, "sine": Sine, "irsel": Irsel}
         args.selector = ["identity", "sine", "irsel"] if args.selector == ["all"] else args.selector
