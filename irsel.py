@@ -3,7 +3,7 @@
 from typing import List, Tuple, Iterable, Callable
 from logging import basicConfig, INFO
 from argparse import ArgumentParser
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, TimeoutExpired
 from timeit import default_timer
 from datetime import timedelta
 from itertools import tee, takewhile
@@ -14,7 +14,7 @@ from gavel.dialects.tptp.parser import TPTPProblemParser
 from gavel.prover.base.interface import BaseProverInterface
 from gavel.prover.eprover.interface import EProverInterface
 from gavel.selection.selector import Selector, Sine
-from gavel.logic.problem import Problem, Sentence
+from gavel.logic.problem import Problem, Sentence, AnnotatedFormula
 from gavel.logic.proof import Proof
 
 from gensim.corpora import Dictionary, MmCorpus
@@ -25,6 +25,8 @@ from gensim.matutils import corpus2dense
 
 # global variables
 verbose = False
+verbose_axiom_number = 20
+verbose_axiom_length = 80
 
 # readable type hints
 TokenList = List[str] # e.g., the token list for "p(a,b)" is ["p", "a", "b"]
@@ -35,6 +37,10 @@ Corpus    = Iterable[Vector] # a lazy term-document matrix
 identity = lambda x: x
 first    = lambda e: e[0]
 second   = lambda e: e[1]
+truncate = lambda s, n: (s[:n] + "...") if len(s) > n else s
+
+# hash AnnotatedFormulas by reference (to enable usage in sets)
+AnnotatedFormula.__hash__ = lambda self: id(self)
 
 def do_to(value, *functions):
     """Threads a value through a chain of functions, inspired by https://clojure.org/guides/threading_macros."""
@@ -143,10 +149,20 @@ class Any:
 class Irsel(Selector):
     """Selects relevant axioms with information retrieval techniques."""
 
-    def __init__(self, dimensions=200, iterations=1, select_until=All(PremiseNumberAtLeast(10), Any(ScoreBelow(1e-10), PremiseNumberAtLeast(1000)))):
+    # defaults
+    default_dimensions = 200
+    default_iterations = 2
+    default_score = 1e-8
+    default_max = 10
+    default_select_until = lambda score, _max: All(Any(ScoreBelow(score), PremiseNumberAtLeast(_max)))
+    default_smart = "nfc" # normalized TF-IDF
+
+    def __init__(self, dimensions=default_dimensions, iterations=default_iterations, select_until=default_select_until(default_score, default_max), smart=default_smart, inspect_premises=[]):
         self.dimensions = dimensions
         self.iterations = iterations
         self.select_until = select_until
+        self.inspect_premises = inspect_premises
+        self.smart = smart
 
     def tokenize_formula(self, formula: Sentence) -> TokenList:
         """Extracts all symbols (predicates, functors, and constants) from a given formula."""
@@ -193,7 +209,7 @@ class Irsel(Selector):
             # with float entries tf-idf(i,j) = tf(i,j) * log2(D/df(i)), where D is the total number of documents and
             # df(i) the number of documents containing the term i. The new document vectors are normalized.
             # Usually we should pass the corpus here. However, the dictionary already contains all required information.
-            tfidf_model = TfidfModel(None, id2word=dictionary, dictionary=dictionary)
+            tfidf_model = TfidfModel(None, id2word=dictionary, dictionary=dictionary, smartirs=self.smart)
         print(tfidf_model)
 
         with Message("Applying TF-IDF model"):
@@ -238,12 +254,20 @@ class Irsel(Selector):
         premises: Iterable[Sentence], query: Sentence) -> Iterable[Sentence]:
         """Queries an index for the premises that match a given formula best."""
 
-        with Message("Querying index for formula"):
+        with Message(f"Querying index for formula {query.name}"):
             # extract symbols from the formula, then transform the token list to an LSI vector
             # and query the index for the formula's similarities to all premises
             similarities = index[query_transformer(self.tokenize_formula(query))]
             score_sum = reduce(lambda x, y: x + y, similarities, 0)
-        
+
+        # show premise scores of interest
+        if self.inspect_premises:
+            print("Inspected axiom scores:")
+            for idx, score in enumerate(similarities):
+                premise_name = premises[idx].name
+                if premise_name in self.inspect_premises:
+                    print(f"{score}\t{premise_name}")
+
         with Message("Selecting best-matching axioms", show_done=not verbose):
             return do_to(
                 similarities, # take the similarity scores, then
@@ -252,9 +276,11 @@ class Irsel(Selector):
                 enumerate, # pair with counter so we can terminate early
                 partial(takewhile, lambda e: not self.select_until(index=e[0], # select premises until done
                     total=len(premises), score=e[1][1], score_sum=score_sum)),
+                partial(map, lambda e: (e[0], (premises[e[1][0]], e[1][1]))), # map premise index to premise
+                partial(map, lambda e: (print(f"{e[1][1]}\t{e[1][0].name}: {truncate(str(e[1][0].formula), n=verbose_axiom_length)}")
+                    if e[0] < verbose_axiom_number else None, e)[1])
+                    if verbose else identity, # print summary
                 partial(map, second), # discard counter
-                partial(map, lambda e: (premises[e[0]], e[1])), # map premise index to premise
-                partial(map, lambda e: (print(f"{e[1]}\t{e[0].formula}"), e)[1]) if verbose else identity, # print summary
                 partial(map, first), # discard scores
                 list # consume generator
             )
@@ -272,17 +298,17 @@ class Irsel(Selector):
         index, query_transformer, premises = self.build_index(problem.premises)
 
         # querying phase: only here do we depend on the conjecture
-        reduced_premises = [] # TODO: use set() to eliminate duplicates, but AnnotatedFormulas are not hashable
-        step = [problem.conjecture] # TODO: iteration does not work yet as intended
+        reduced_premises = set()
+        step = [problem.conjecture]
         for i in range(0, self.iterations):
             if self.iterations > 1:
                 print(f"Iteration {i + 1} of {self.iterations}:")
-            step = (new_formula for formula in step for new_formula in self.query_index(index, query_transformer, premises, query=formula))
-            len_before = len(reduced_premises)
-            reduced_premises.extend(step)
-            if len(reduced_premises) == len_before:
+            step = set([new_formula for formula in step for new_formula in self.query_index(index, query_transformer, premises, query=formula)])
+            step = step.difference(reduced_premises)
+            if not step:
                 print("Reached fixed point.")
                 break
+            reduced_premises.update(step)
 
         return Problem(premises=reduced_premises, conjecture=problem.conjecture)
 
@@ -301,11 +327,17 @@ class Main:
         with Timer() as selection_timer:
             reduced_problem = selector.select(problem)
         print(f"Selected {len(reduced_problem.premises)} of {len(problem.premises)} axioms.")
+        if verbose and isinstance(selector, Sine):
+            for premise in reduced_problem.premises:
+                print(premise.formula)
 
         with Message("Attempting proof") as message:
             try:
                 proof = prover.prove(reduced_problem)
             except CalledProcessError:
+                proof = None
+            except TimeoutExpired:
+                print("Timeout while attempting proof.")
                 proof = None
             proof_timer = message.timer
             premise_num = len(problem.premises)
@@ -313,44 +345,59 @@ class Main:
             return proof, selection_timer, proof_timer, premise_num, reduced_premise_num
 
     def __init__(self):
-        parser = ArgumentParser("irsel")
-        parser.add_argument("problem_file", help="TPTP problem file")
-        parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
-        parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
-        args = parser.parse_args()
+        arg_parser = ArgumentParser("irsel")
+        arg_parser.add_argument("problem_file", help="TPTP problem file", nargs='+')
+        arg_parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
+        arg_parser.add_argument("-d", "--dimensions", action="store", type=int, help="number of latent dimensions", default=Irsel.default_dimensions)
+        arg_parser.add_argument("-n", "--iterations", action="store", type=int, help="number of querying iterations", default=Irsel.default_iterations)
+        arg_parser.add_argument("--score", action="store", type=float, help="minimum score to select axiom (per iteration)", default=Irsel.default_score)
+        arg_parser.add_argument("--max", action="store", type=int, help="maximum number of selected axioms (per iteration)", default=Irsel.default_max)
+        arg_parser.add_argument("--smart", action="store", help="SMART Information Retrieval System mnemonic", default=Irsel.default_smart)
+        arg_parser.add_argument("-i", "--inspect", action="append", help="name of axiom to inspect")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
+        arg_parser.add_argument("-t", "--timeout", action="store", type=float, help="EProver timeout in seconds (default: none)")
+        args = arg_parser.parse_args()
         if args.verbose:
             global verbose
             verbose = True
             basicConfig(format="%(levelname)s: %(message)s", level=INFO)
 
+        parser = TPTPProblemParser()
+        prover = EProverInterface(timeout=args.timeout)
+        irsel_kwargs = {"dimensions": args.dimensions, "iterations": args.iterations, "inspect_premises": args.inspect,
+            "select_until": Irsel.default_select_until(args.score, args.max), "smart": args.smart}
+
         selector_map = {"identity": Selector, "sine": Sine, "irsel": Irsel}
         args.selector = ["identity", "sine", "irsel"] if args.selector == ["all"] else args.selector
-        selectors = [selector_map[selector_name]() for selector_name in
-            (args.selector if args.selector else ["irsel"]) if selector_name in selector_map]
+        selectors = [(selector_map[selector_name](**irsel_kwargs) if selector_name == "irsel" else selector_map[selector_name]())
+            for selector_name in (args.selector if args.selector else ["irsel"]) if selector_name in selector_map]
         results = {}
 
-        problem = self.parse(TPTPProblemParser(), args.problem_file)
-
-        for selector in selectors:
+        for problem_file in args.problem_file:
             print()
-            selector_name = type(selector).__name__.lower() if type(selector) != Selector else "identity"
-            print(f"- {selector_name} selector -")
-            proof, selection_timer, proof_timer, premise_num, reduced_premise_num = self.prove(
-                problem=problem, selector=selector, prover=EProverInterface())
-            results[selector_name] = (proof, selection_timer, proof_timer, premise_num, reduced_premise_num)
-            if proof:
-                print(f"Proof found with {len(proof.steps)} steps.")#
-            else:
-                print(f"No proof found for conjecture. Maybe the {selector_name} selector is too strict?")
+            print(f"- Problem {problem_file} -")
+            problem = self.parse(parser, problem_file)
 
-        print()
-        print("- summary -")
-        print("{0:15} {1:15} {2:15} {3:15} {4}".format("selector", "proof steps", "selection time", "proof time", "selection ratio"))
-        for selector_name in results:
-            proof, selection_timer, proof_timer, premise_num, reduced_premise_num = results[selector_name]
-            print("{0:15} {1:15} {2:15} {3:15} {4}% ({5} of {6})".format(
-                selector_name, str(len(proof.steps)) if proof else "-", str(selection_timer), str(proof_timer),
-                round(reduced_premise_num / premise_num * 100, 2), reduced_premise_num, premise_num))
+            for selector in selectors:
+                print()
+                selector_name = type(selector).__name__.lower() if type(selector) != Selector else "identity"
+                print(f"- {selector_name} selector -")
+                proof, selection_timer, proof_timer, premise_num, reduced_premise_num = self.prove(
+                    problem=problem, selector=selector, prover=prover)
+                results[selector_name] = (proof, selection_timer, proof_timer, premise_num, reduced_premise_num)
+                if proof:
+                    print(f"Proof found with {len(proof.steps)} steps.")
+                else:
+                    print(f"No proof found for conjecture. Maybe the {selector_name} selector is too strict?")
+
+            print()
+            print("- summary -")
+            print("{0:15} {1:15} {2:15} {3:15} {4}".format("selector", "proof steps", "selection time", "proof time", "selection ratio"))
+            for selector_name in results:
+                proof, selection_timer, proof_timer, premise_num, reduced_premise_num = results[selector_name]
+                print("{0:15} {1:15} {2:15} {3:15} {4}% ({5} of {6})".format(
+                    selector_name, str(len(proof.steps)) if proof else "-", str(selection_timer), str(proof_timer),
+                    round(reduced_premise_num / premise_num * 100, 2), reduced_premise_num, premise_num))
 
 if __name__ == "__main__":
     Main()
