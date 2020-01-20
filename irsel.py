@@ -158,6 +158,7 @@ class Irsel(Selector):
     default_max = 10
     default_select_until = lambda score, _max: All(Any(ScoreBelow(score), PremiseNumberAtLeast(_max)))
     default_smart = "nfc" # normalized TF-IDF
+    index_cache = None
 
     def __init__(self, dimensions=default_dimensions, iterations=default_iterations,
         select_until=default_select_until(default_score, default_max), smart=default_smart, inspect_premises=[]):
@@ -166,6 +167,9 @@ class Irsel(Selector):
         self.select_until = select_until
         self.inspect_premises = inspect_premises
         self.smart = smart
+
+    def __str__(self):
+        return "irsel"
 
     def tokenize_formula(self, formula: Sentence) -> TokenList:
         """Extracts all symbols (predicates, functors, and constants) from a given formula."""
@@ -250,6 +254,15 @@ class Irsel(Selector):
     def build_index(self, premises: Iterable[Sentence]) -> Tuple[Similarity, Callable[[TokenList], Vector], Iterable[Sentence]]:
         """Builds an index from given premises that can be used to answer similarity queries."""
 
+        if Irsel.index_cache:
+            # if an index has already been built for these TF-IDF parameters, reuse it
+            cached_smart, cached_dimensions, cached_index, cached_query_transformer, cached_premises = Irsel.index_cache
+            if cached_smart == self.smart and cached_dimensions == self.dimensions and cached_premises is premises:
+                print("Hitting index cache.")
+                return cached_index, cached_query_transformer, cached_premises
+            else:
+                print("Skipping index cache.")
+
         dictionary, corpus = self.build_corpus(premises) # create a term-document matrix
         corpus, query_transformer = self.transform_corpus(dictionary, corpus) # apply TF-IDF and LSI models
 
@@ -258,6 +271,8 @@ class Irsel(Selector):
             index = Similarity(get_tmpfile(f"irsel_index"), corpus, num_features=len(dictionary))
         printq(index)
 
+        # allows us to reuse this index for later proof attempts with the same parameters
+        Irsel.index_cache = self.smart, self.dimensions, index, query_transformer, premises
         return index, query_transformer, premises
 
     def query_index(self, index: Similarity, query_transformer: Callable[[TokenList], Vector],
@@ -339,7 +354,7 @@ class Main:
         printq(f"Selected {len(reduced_problem.premises)} of {len(problem.premises)} axioms.")
         if verbose and isinstance(selector, Sine):
             for premise in reduced_problem.premises:
-                print(premise.formula)
+                print(f"{premise.name}: {truncate(str(premise.formula), n=verbose_axiom_length)}")
 
         with Message("Attempting proof") as message:
             try:
@@ -358,16 +373,17 @@ class Main:
         arg_parser = ArgumentParser("irsel")
         arg_parser.add_argument("problem_file", help="TPTP problem file", nargs='+')
         arg_parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
+        arg_parser.add_argument("-c", "--compare", action="store_true", help="compare pairs of selectors")
+        arg_parser.add_argument("-t", "--timeout", action="store", type=float, help="EProver timeout in seconds (default: none)")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
+        arg_parser.add_argument("-q", "--quiet", action="store_true", help="print less information")
+        # the following arguments are only active when using the irsel selector directly
         arg_parser.add_argument("-d", "--dimensions", action="store", type=int, help="number of latent dimensions, 0 to disable LSI", default=Irsel.default_dimensions)
         arg_parser.add_argument("-n", "--iterations", action="store", type=int, help="number of querying iterations", default=Irsel.default_iterations)
         arg_parser.add_argument("--score", action="store", type=float, help="minimum score to select axiom (per iteration)", default=Irsel.default_score)
         arg_parser.add_argument("--max", action="store", type=int, help="maximum number of selected axioms (per iteration)", default=Irsel.default_max)
         arg_parser.add_argument("--smart", action="store", help="SMART Information Retrieval System mnemonic", default=Irsel.default_smart)
         arg_parser.add_argument("-i", "--inspect", action="append", help="name of axiom to inspect")
-        arg_parser.add_argument("-c", "--compare", action="store_true", help="compare pairs of selectors")
-        arg_parser.add_argument("-t", "--timeout", action="store", type=float, help="EProver timeout in seconds (default: none)")
-        arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
-        arg_parser.add_argument("-q", "--quiet", action="store_true", help="print less information")
         args = arg_parser.parse_args()
         if args.verbose and not args.quiet:
             global verbose
@@ -395,7 +411,12 @@ class Main:
 
             for selector in selectors:
                 printq()
-                selector_name = type(selector).__name__.lower() if type(selector) != Selector else "identity"
+                if type(selector) == Selector:
+                    selector_name = "identity"
+                elif type(selector).__str__ is not object.__str__:
+                    selector_name = str(selector)
+                else:
+                    selector_name = type(selector).__name__.lower()
                 printq(f"- {selector_name} selector -")
                 proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises = self.prove(
                     problem=problem, selector=selector, prover=prover)
