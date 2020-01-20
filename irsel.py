@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 from subprocess import CalledProcessError, TimeoutExpired
 from timeit import default_timer
 from datetime import timedelta
-from itertools import tee, takewhile
+from itertools import tee, takewhile, combinations
 from functools import partial, reduce
 
 from gavel.dialects.base.parser import ProblemParser
@@ -25,6 +25,7 @@ from gensim.matutils import corpus2dense
 
 # global variables
 verbose = False
+quiet = False
 verbose_axiom_number = 20
 verbose_axiom_length = 80
 
@@ -38,6 +39,7 @@ identity = lambda x: x
 first    = lambda e: e[0]
 second   = lambda e: e[1]
 truncate = lambda s, n: (s[:n] + "...") if len(s) > n else s
+printq   = lambda *args, **kwargs: printf(*args, **kwargs) if not quiet else None
 
 # hash AnnotatedFormulas by reference (to enable usage in sets)
 AnnotatedFormula.__hash__ = lambda self: id(self)
@@ -80,13 +82,13 @@ class Message:
 
     def __enter__(self):
         self.timer = Timer()
-        print(f"{self.message} ... ", end="" if self.show_done else "\n", flush=True)
+        printq(f"{self.message} ... ", end="" if self.show_done else "\n", flush=True)
         return self
 
     def __exit__(self, type, value, traceback):
         self.timer.stop()
         if self.show_done:
-            print(f"done ({self.timer} seconds)." if self.timer() >= 1 else "done.")
+            printq(f"done ({self.timer} seconds)." if self.timer() >= 1 else "done.")
 
 class PremiseNumberAtLeast:
     """Triggers after a fixed number of premises."""
@@ -157,7 +159,8 @@ class Irsel(Selector):
     default_select_until = lambda score, _max: All(Any(ScoreBelow(score), PremiseNumberAtLeast(_max)))
     default_smart = "nfc" # normalized TF-IDF
 
-    def __init__(self, dimensions=default_dimensions, iterations=default_iterations, select_until=default_select_until(default_score, default_max), smart=default_smart, inspect_premises=[]):
+    def __init__(self, dimensions=default_dimensions, iterations=default_iterations,
+        select_until=default_select_until(default_score, default_max), smart=default_smart, inspect_premises=[]):
         self.dimensions = dimensions
         self.iterations = iterations
         self.select_until = select_until
@@ -182,7 +185,7 @@ class Irsel(Selector):
             # without having to load it into RAM as a whole at any time.
             MmCorpus.serialize(f, corpus)
             corpus = MmCorpus(f) # this instance can be consumed as often as we want
-        print(corpus)
+        printq(corpus)
         return corpus
 
     def build_corpus(self, premises: Iterable[Sentence]) -> Tuple[Dictionary, Corpus]:
@@ -191,7 +194,7 @@ class Irsel(Selector):
         with Message("Building dictionary of symbols"):
             # Establish a mapping from symbols to unique IDs. All following data structures will make use of this mapping.
             dictionary = Dictionary(self.tokenize_premises(premises))
-        print(dictionary)
+        printq(dictionary)
 
         with Message("Building corpus of premises"):
             # Transform each document (premise) to a sparse bag-of-words vector (containing term frequencies).
@@ -210,7 +213,7 @@ class Irsel(Selector):
             # df(i) the number of documents containing the term i. The new document vectors are normalized.
             # Usually we should pass the corpus here. However, the dictionary already contains all required information.
             tfidf_model = TfidfModel(None, id2word=dictionary, dictionary=dictionary, smartirs=self.smart)
-        print(tfidf_model)
+        printq(tfidf_model)
 
         with Message("Applying TF-IDF model"):
             # Perform actual transformation from TF to TF-IDF vector space ([] is overloaded to mean "apply transformation").
@@ -220,7 +223,7 @@ class Irsel(Selector):
             # Apply latent semantic indexing (that is, a singular value decomposition on the TF-IDF matrix) to discover
             # "topics" or clusters of co-occuring symbols. Reduces dimensions to num_topics with low-rank approximation.
             lsi_model = LsiModel(tfidf_corpus, id2word=dictionary, num_topics=self.dimensions)
-        print(lsi_model)
+        printq(lsi_model)
 
         with Message("Applying LSI model"):
             # Transform X = tfidf_corpus from TF-IDF to LSI space. For X = U*S*V^T, this computes U^-1*X = V*S.
@@ -246,7 +249,7 @@ class Irsel(Selector):
         with Message("Storing index"):
             # Builds an index which we can compare queries against.
             index = Similarity(get_tmpfile(f"irsel_index"), corpus, num_features=len(dictionary))
-        print(index)
+        printq(index)
 
         return index, query_transformer, premises
 
@@ -302,11 +305,11 @@ class Irsel(Selector):
         step = [problem.conjecture]
         for i in range(0, self.iterations):
             if self.iterations > 1:
-                print(f"Iteration {i + 1} of {self.iterations}:")
+                printq(f"Iteration {i + 1} of {self.iterations}:")
             step = set([new_formula for formula in step for new_formula in self.query_index(index, query_transformer, premises, query=formula)])
             step = step.difference(reduced_premises)
             if not step:
-                print("Reached fixed point.")
+                printq("Reached fixed point.")
                 break
             reduced_premises.update(step)
 
@@ -321,12 +324,12 @@ class Main:
             raise ValueError("could not parse problem")
         return problem
 
-    def prove(self, problem: Problem, selector: Selector, prover: BaseProverInterface) -> Tuple[Proof, Timer, Timer, int, int]:
+    def prove(self, problem: Problem, selector: Selector, prover: BaseProverInterface) -> Tuple[Proof, Timer, Timer, int, int, Iterable[Sentence]]:
         """Selects relevant axioms and attempts to construct a proof."""
-        print("Performing axiom selection.")
+        printq("Performing axiom selection.")
         with Timer() as selection_timer:
             reduced_problem = selector.select(problem)
-        print(f"Selected {len(reduced_problem.premises)} of {len(problem.premises)} axioms.")
+        printq(f"Selected {len(reduced_problem.premises)} of {len(problem.premises)} axioms.")
         if verbose and isinstance(selector, Sine):
             for premise in reduced_problem.premises:
                 print(premise.formula)
@@ -337,12 +340,12 @@ class Main:
             except CalledProcessError:
                 proof = None
             except TimeoutExpired:
-                print("Timeout while attempting proof.")
+                printq("Timeout while attempting proof.")
                 proof = None
             proof_timer = message.timer
             premise_num = len(problem.premises)
             reduced_premise_num = len(reduced_problem.premises)
-            return proof, selection_timer, proof_timer, premise_num, reduced_premise_num
+            return proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_problem.premises
 
     def __init__(self):
         arg_parser = ArgumentParser("irsel")
@@ -354,13 +357,18 @@ class Main:
         arg_parser.add_argument("--max", action="store", type=int, help="maximum number of selected axioms (per iteration)", default=Irsel.default_max)
         arg_parser.add_argument("--smart", action="store", help="SMART Information Retrieval System mnemonic", default=Irsel.default_smart)
         arg_parser.add_argument("-i", "--inspect", action="append", help="name of axiom to inspect")
-        arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
+        arg_parser.add_argument("-c", "--compare", action="store_true", help="compare pairs of selectors")
         arg_parser.add_argument("-t", "--timeout", action="store", type=float, help="EProver timeout in seconds (default: none)")
+        arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
+        arg_parser.add_argument("-q", "--quiet", action="store_true", help="print less information")
         args = arg_parser.parse_args()
-        if args.verbose:
+        if args.verbose and not args.quiet:
             global verbose
             verbose = True
             basicConfig(format="%(levelname)s: %(message)s", level=INFO)
+        if args.quiet:
+            global quiet
+            quiet = True
 
         parser = TPTPProblemParser()
         prover = EProverInterface(timeout=args.timeout)
@@ -379,22 +387,36 @@ class Main:
             problem = self.parse(parser, problem_file)
 
             for selector in selectors:
-                print()
+                printq()
                 selector_name = type(selector).__name__.lower() if type(selector) != Selector else "identity"
-                print(f"- {selector_name} selector -")
-                proof, selection_timer, proof_timer, premise_num, reduced_premise_num = self.prove(
+                printq(f"- {selector_name} selector -")
+                proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises = self.prove(
                     problem=problem, selector=selector, prover=prover)
-                results[selector_name] = (proof, selection_timer, proof_timer, premise_num, reduced_premise_num)
+                results[selector_name] = (proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises)
                 if proof:
-                    print(f"Proof found with {len(proof.steps)} steps.")
+                    printq(f"Proof found with {len(proof.steps)} steps.")
                 else:
-                    print(f"No proof found for conjecture. Maybe the {selector_name} selector is too strict?")
+                    printq(f"No proof found for conjecture. Maybe the {selector_name} selector is too strict?")
 
-            print()
-            print("- summary -")
+            if args.compare:
+                map_name = lambda f: str(f.name)
+                for s1, s2 in combinations(selector_map.keys(), 2):
+                    if s1 != "identity" and s2 != "identity":
+                        print(f"Comparison of selectors {s1} and {s2}:")
+                        _, _, _, _, _, p1 = results[s1]
+                        _, _, _, _, _, p2 = results[s2]
+                        p1 = set(p1)
+                        p2 = set(p2)
+                        print(f"both: {list(map(map_name, p1.intersection(p2)))}")
+                        print(f"only {s1}: {list(map(map_name, p1.difference(p2)))}")
+                        print(f"only {s2}: {list(map(map_name, p2.difference(p1)))}")
+                        print(f"Jaccard index: {round(len(p1.intersection(p2)) / len(p1.union(p2)) * 100, 2)}%")
+
+            printq()
+            printq("- summary -")
             print("{0:15} {1:15} {2:15} {3:15} {4}".format("selector", "proof steps", "selection time", "proof time", "selection ratio"))
             for selector_name in results:
-                proof, selection_timer, proof_timer, premise_num, reduced_premise_num = results[selector_name]
+                proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises = results[selector_name]
                 print("{0:15} {1:15} {2:15} {3:15} {4}% ({5} of {6})".format(
                     selector_name, str(len(proof.steps)) if proof else "-", str(selection_timer), str(proof_timer),
                     round(reduced_premise_num / premise_num * 100, 2), reduced_premise_num, premise_num))
