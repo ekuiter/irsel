@@ -48,6 +48,15 @@ def do_to(value, *functions):
     """Threads a value through a chain of functions, inspired by https://clojure.org/guides/threading_macros."""
     return reduce(lambda f, g: lambda x: g(f(x)), functions, identity)(value)
 
+def get_selector_name(selector):
+    """Returns a human-readable selector name."""
+    if type(selector) == Selector:
+        return "identity"
+    elif type(selector).__str__ is not object.__str__:
+        return str(selector)
+    else:
+        return type(selector).__name__.lower()
+
 class Timer:
     """Measures elapsed time."""
 
@@ -258,10 +267,10 @@ class Irsel(Selector):
             # if an index has already been built for these TF-IDF parameters, reuse it
             cached_smart, cached_dimensions, cached_index, cached_query_transformer, cached_premises = Irsel.index_cache
             if cached_smart == self.smart and cached_dimensions == self.dimensions and cached_premises is premises:
-                print("Hitting index cache.")
+                printq("Hitting index cache.")
                 return cached_index, cached_query_transformer, cached_premises
             else:
-                print("Skipping index cache.")
+                printq("Skipping index cache.")
 
         dictionary, corpus = self.build_corpus(premises) # create a term-document matrix
         corpus, query_transformer = self.transform_corpus(dictionary, corpus) # apply TF-IDF and LSI models
@@ -337,6 +346,86 @@ class Irsel(Selector):
 
         return Problem(premises=reduced_premises, conjecture=problem.conjecture)
 
+# Irsel<wxyz>: w = binary/TF, x = 0/200 dimensions, y = 1/2 iterations, z = score 1e-1/1e-8
+smart_0 = "nfc"
+smart_1 = "bfc"
+dim_0 = 0
+dim_1 = 200
+it_0 = 1
+it_1 = 2
+score_0 = 1e-1
+score_1 = 1e-8
+max_0 = 100
+max_1 = 10
+
+# normalized TF-IDF, no LSI
+class Irsel0000(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_0, iterations=it_0, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel0000"
+
+class Irsel0001(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_0, iterations=it_0, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel0001"
+
+class Irsel0010(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_0, iterations=it_1, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel0010"
+
+class Irsel0011(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_0, iterations=it_1, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel0011"
+
+# normalized TF-IDF, 200-dimensional LSI
+class Irsel0100(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_1, iterations=it_0, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel0100"
+
+class Irsel0101(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_1, iterations=it_0, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel0101"
+
+class Irsel0110(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_1, iterations=it_1, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel0110"
+
+class Irsel0111(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_0, dimensions=dim_1, iterations=it_1, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel0111"
+
+# normalized binary IDF, no LSI
+class Irsel1000(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_0, iterations=it_0, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel1000"
+
+class Irsel1001(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_0, iterations=it_0, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel1001"
+
+class Irsel1010(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_0, iterations=it_1, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel1010"
+
+class Irsel1011(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_0, iterations=it_1, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel1011"
+
+# normalized binary IDF, 200-dimensional LSI
+class Irsel1100(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_1, iterations=it_0, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel1100"
+
+class Irsel1101(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_1, iterations=it_0, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_0))))
+    __str__ = lambda self: "irsel1101"
+
+class Irsel1110(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_1, iterations=it_1, select_until=All(Any(ScoreBelow(score_0), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel1110"
+
+class Irsel1111(Irsel):
+    __init__ = lambda self: super().__init__(smart=smart_1, dimensions=dim_1, iterations=it_1, select_until=All(Any(ScoreBelow(score_1), PremiseNumberAtLeast(max_1))))
+    __str__ = lambda self: "irsel1111"
+
 class Main:
     def parse(self, parser: ProblemParser, filename: str) -> Problem:
         """Parses a problem from a file."""
@@ -373,6 +462,8 @@ class Main:
         arg_parser = ArgumentParser("irsel")
         arg_parser.add_argument("problem_file", help="TPTP problem file", nargs='+')
         arg_parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
+        arg_parser.add_argument("-a", "--all", action="store_true", help="select with identity, sine and irsel")
+        arg_parser.add_argument("-e", "--evaluate", action="store_true", help="select with several irsel variants")
         arg_parser.add_argument("-c", "--compare", action="store_true", help="compare pairs of selectors")
         arg_parser.add_argument("-t", "--timeout", action="store", type=float, help="EProver timeout in seconds (default: none)")
         arg_parser.add_argument("-v", "--verbose", action="store_true", help="print verbose information")
@@ -399,9 +490,13 @@ class Main:
             "select_until": Irsel.default_select_until(args.score, args.max), "smart": args.smart}
 
         selector_map = {"identity": Selector, "sine": Sine, "irsel": Irsel}
-        args.selector = ["identity", "sine", "irsel"] if args.selector == ["all"] else args.selector
+        args.selector = ["identity", "sine", "irsel"] if args.all else args.selector
         selectors = [(selector_map[selector_name](**irsel_kwargs) if selector_name == "irsel" else selector_map[selector_name]())
-            for selector_name in (args.selector if args.selector else ["irsel"]) if selector_name in selector_map]
+            for selector_name in (args.selector if args.selector else ([] if args.evaluate else ["irsel"])) if selector_name in selector_map]
+        if args.evaluate:
+            selectors.extend([
+                Irsel0000(), Irsel0001(), Irsel0010(), Irsel0011(), Irsel0100(), Irsel0101(), Irsel0110(), Irsel0111(),
+                Irsel1000(), Irsel1001(), Irsel1010(), Irsel1011(), Irsel1100(), Irsel1101(), Irsel1110(), Irsel1111()])
         results = {}
 
         for problem_file in args.problem_file:
@@ -411,12 +506,7 @@ class Main:
 
             for selector in selectors:
                 printq()
-                if type(selector) == Selector:
-                    selector_name = "identity"
-                elif type(selector).__str__ is not object.__str__:
-                    selector_name = str(selector)
-                else:
-                    selector_name = type(selector).__name__.lower()
+                selector_name = get_selector_name(selector)
                 printq(f"- {selector_name} selector -")
                 proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises = self.prove(
                     problem=problem, selector=selector, prover=prover)
@@ -428,20 +518,27 @@ class Main:
 
             if args.compare:
                 map_name = lambda f: str(f.name)
-                for s1, s2 in combinations(selector_map.keys(), 2):
-                    if s1 != "identity" and s2 != "identity":
-                        print(f"Comparison of selectors {s1} and {s2}:")
-                        _, _, _, _, _, p1 = results[s1]
-                        _, _, _, _, _, p2 = results[s2]
+                jaccard = lambda p1, p2: len(p1.intersection(p2)) / len(p1.union(p2))
+                print()
+                print("- comparison -")
+                print("{0:15} {1:15} {2:10} {3:10} {4:10} {5}".format("selector 1", "selector 2", "Jaccard", "both", "only 1", "only 2"))
+                for s1, s2 in sorted(combinations(selectors, 2),
+                    key=lambda e: -jaccard(set(results[get_selector_name(e[0])][5]), set(results[get_selector_name(e[1])][5]))):
+                    if type(s1) != Selector and type(s2) != Selector and not (isinstance(s1, Irsel) and isinstance(s2, Irsel)):
+                        s1_name = get_selector_name(s1)
+                        s2_name = get_selector_name(s2)
+                        _, _, _, _, _, p1 = results[s1_name]
+                        _, _, _, _, _, p2 = results[s2_name]
                         p1 = set(p1)
                         p2 = set(p2)
-                        print(f"both: {list(map(map_name, p1.intersection(p2)))}")
-                        print(f"only {s1}: {list(map(map_name, p1.difference(p2)))}")
-                        print(f"only {s2}: {list(map(map_name, p2.difference(p1)))}")
-                        print(f"Jaccard index: {round(len(p1.intersection(p2)) / len(p1.union(p2)) * 100, 2)}%")
+                        print("{0:15} {1:15} {2:10} {3:10} {4:10} {5}".format(s1_name, s2_name,
+                            f"{round(jaccard(p1, p2) * 100, 2)}%",
+                            str(len(list(map(map_name, p1.intersection(p2))))),
+                            str(len(list(map(map_name, p1.difference(p2))))),
+                            str(len(list(map(map_name, p2.difference(p1)))))))
 
-            printq()
-            printq("- summary -")
+            print()
+            print("- results -")
             print("{0:15} {1:15} {2:15} {3:15} {4}".format("selector", "proof steps", "selection time", "proof time", "selection ratio"))
             for selector_name in results:
                 proof, selection_timer, proof_timer, premise_num, reduced_premise_num, reduced_premises = results[selector_name]

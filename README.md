@@ -24,8 +24,8 @@ To prove theorems from [TPTP](http://www.tptp.org/), [download the TPTP](http://
 For example, run the following to try proving the given example problems with no selector (identity), sine and irsel (with 5 minute timeout for EProver):
 
 ```
-./irsel.sh examples/* -s all -t 300 -q > results.txt 2>&1 # for a short summary like below
-./irsel.sh examples/* -s all -t 300 -v -c > results.txt 2>&1 # creates a detailed report including selected axioms
+./irsel.sh examples/* -aqt 300 > results.txt 2>&1 # for a short summary like below
+./irsel.sh examples/* -avct 300 > results.txt 2>&1 # creates a detailed report including selected axioms
 ```
 
 On my machine, this produces the following `results.txt`. **Note that running this can take up to six hours.**
