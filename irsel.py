@@ -219,26 +219,33 @@ class Irsel(Selector):
             # Perform actual transformation from TF to TF-IDF vector space ([] is overloaded to mean "apply transformation").
             tfidf_corpus = tfidf_model[corpus]
 
-        with Message("Initializing LSI model"):
-            # Apply latent semantic indexing (that is, a singular value decomposition on the TF-IDF matrix) to discover
-            # "topics" or clusters of co-occuring symbols. Reduces dimensions to num_topics with low-rank approximation.
-            lsi_model = LsiModel(tfidf_corpus, id2word=dictionary, num_topics=self.dimensions)
-        printq(lsi_model)
+        if self.dimensions:
+            with Message("Initializing LSI model"):
+                # Apply latent semantic indexing (that is, a singular value decomposition on the TF-IDF matrix) to discover
+                # "topics" or clusters of co-occuring symbols. Reduces dimensions to num_topics with low-rank approximation.
+                lsi_model = LsiModel(tfidf_corpus, id2word=dictionary, num_topics=self.dimensions)
+            printq(lsi_model)
 
-        with Message("Applying LSI model"):
-            # Transform X = tfidf_corpus from TF-IDF to LSI space. For X = U*S*V^T, this computes U^-1*X = V*S.
-            # This reduces dimensions and "squishes" similar "topics"/related symbols into the same dimension.
-            lsi_corpus = lsi_model[tfidf_corpus]
+            with Message("Applying LSI model"):
+                # Transform X = tfidf_corpus from TF-IDF to LSI space. For X = U*S*V^T, this computes U^-1*X = V*S.
+                # This reduces dimensions and "squishes" similar "topics"/related symbols into the same dimension.
+                lsi_corpus = lsi_model[tfidf_corpus]
 
-        if verbose:
-            U = lsi_model.projection.u # relates terms (rows) to topics (columns)
-            S = lsi_model.projection.s # ranks relevance of topics
-            V = corpus2dense(lsi_corpus, len(S)).T / S # relates documents (rows) to topics (vectors)
-            print(f"U = {U.shape}, S = {S.shape}, V = {V.shape}")
+            if verbose:
+                U = lsi_model.projection.u # relates terms (rows) to topics (columns)
+                S = lsi_model.projection.s # ranks relevance of topics
+                V = corpus2dense(lsi_corpus, len(S)).T / S # relates documents (rows) to topics (vectors)
+                print(f"U = {U.shape}, S = {S.shape}, V = {V.shape}")
 
-        # to query the index later, we have to transform the queried formula the same way we transformed the corpus
-        query_transformer = lambda tokenized_formula: lsi_model[tfidf_model[dictionary.doc2bow(tokenized_formula)]]
-        return lsi_corpus, query_transformer
+            # to query the index later, we have to transform the queried formula the same way we transformed the corpus
+            new_corpus = lsi_corpus
+            query_transformer = lambda tokenized_formula: lsi_model[tfidf_model[dictionary.doc2bow(tokenized_formula)]]
+        else:
+            printq("Skipping LSI model.")
+            new_corpus = tfidf_corpus
+            query_transformer = lambda tokenized_formula: tfidf_model[dictionary.doc2bow(tokenized_formula)]
+
+        return new_corpus, query_transformer
 
     def build_index(self, premises: Iterable[Sentence]) -> Tuple[Similarity, Callable[[TokenList], Vector], Iterable[Sentence]]:
         """Builds an index from given premises that can be used to answer similarity queries."""
@@ -351,7 +358,7 @@ class Main:
         arg_parser = ArgumentParser("irsel")
         arg_parser.add_argument("problem_file", help="TPTP problem file", nargs='+')
         arg_parser.add_argument("-s", "--selector", action="append", help="identity, sine or irsel (default)")
-        arg_parser.add_argument("-d", "--dimensions", action="store", type=int, help="number of latent dimensions", default=Irsel.default_dimensions)
+        arg_parser.add_argument("-d", "--dimensions", action="store", type=int, help="number of latent dimensions, 0 to disable LSI", default=Irsel.default_dimensions)
         arg_parser.add_argument("-n", "--iterations", action="store", type=int, help="number of querying iterations", default=Irsel.default_iterations)
         arg_parser.add_argument("--score", action="store", type=float, help="minimum score to select axiom (per iteration)", default=Irsel.default_score)
         arg_parser.add_argument("--max", action="store", type=int, help="maximum number of selected axioms (per iteration)", default=Irsel.default_max)
