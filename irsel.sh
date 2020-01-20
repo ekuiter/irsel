@@ -1,2 +1,2 @@
 #!/bin/bash
-TPTP_ROOT=tptp EPROVER=./eprover ./irsel.py "$@"
+TPTP_ROOT=tptp EPROVER=./eprover src/main.py "$@"

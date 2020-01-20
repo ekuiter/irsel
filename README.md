@@ -11,24 +11,24 @@ To set up irsel, choose one of the following options.
 
 - **Using Vagrant**: With [VirtualBox](https://www.virtualbox.org/wiki/Downloads) and [Vagrant](https://www.vagrantup.com/downloads.html) installed, run `vagrant up`, `vagrant ssh` and `cd /vagrant`.
 - **Manual setup on Linux**: To set up on a Linux system with Python 3, install some additional dependencies: `python3 -m pip install gavel gensim`
-- **Manual Setup on Windows**: On a Windows machine, install [WSL-Ubuntu](https://docs.microsoft.com/de-de/windows/wsl/install-win10) and install the dependencies like above from wsl.exe.
+- **Manual setup on Windows**: On a Windows machine, install [WSL](https://docs.microsoft.com/de-de/windows/wsl/install-win10) and, from wsl.exe, the Python dependencies.
 
 ### Usage
 
-Run irsel with `./irsel.sh <args>` or `./irsel <args>` on Windows from cmd.exe (`-h` for help).
+Run irsel with `./irsel.sh <args>` or, in cmd.exe on Windows, `./irsel <args>` (`-h` for help).
 
-To prove theorems from [TPTP](http://www.tptp.org/), [download the TPTP](http://www.tptp.org/TPTP/Distribution/TPTP-v7.3.0.tgz) to the `tptp` folder and run `./irsel.sh tptp/Problems/<some problem>`.
+To prove theorems from [TPTP](http://www.tptp.org/), [download TPTP](http://www.tptp.org/TPTP/Distribution/TPTP-v7.3.0.tgz) to the `tptp` folder and run `./irsel.sh tptp/Problems/<some problem>`.
 
 ### Evaluation
 
-For example, run the following to try proving the given example problems with no selector (identity), sine and irsel (with 5 minute timeout for EProver):
+Run the following to try proving the given example problems with several selectors (`-a`) and 5 minute timeout for EProver (`-t 300`).
 
 ```
 ./irsel.sh examples/* -aqt 300 > results.txt 2>&1 # for a short summary like below
 ./irsel.sh examples/* -avct 300 > results.txt 2>&1 # creates a detailed report including selected axioms
 ```
 
-On my machine, this produces the following `results.txt`. **Note that running this can take up to six hours.**
+On my machine, this produces the following output. **Note that running this can take up to six hours.**
 
 ```
 - Problem examples/problem1.p -

@@ -2,3 +2,4 @@ tptp
 *.log
 .vagrant
 *.txt
+__pycache__
