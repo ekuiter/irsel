@@ -1,1 +1,4 @@
 tptp
+*.log
+.vagrant
+*.txt

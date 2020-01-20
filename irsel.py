@@ -39,7 +39,7 @@ identity = lambda x: x
 first    = lambda e: e[0]
 second   = lambda e: e[1]
 truncate = lambda s, n: (s[:n] + "...") if len(s) > n else s
-printq   = lambda *args, **kwargs: printf(*args, **kwargs) if not quiet else None
+printq   = lambda *args, **kwargs: print(*args, **kwargs) if not quiet else None
 
 # hash AnnotatedFormulas by reference (to enable usage in sets)
 AnnotatedFormula.__hash__ = lambda self: id(self)
