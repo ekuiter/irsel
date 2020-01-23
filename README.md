@@ -21,9 +21,9 @@ To prove theorems from [TPTP](http://www.tptp.org/), [download TPTP](http://www.
 
 ### Evaluation
 
-Run the following to try proving the given example problems with identity, sine and irsel selectors (`-a`), irsel variations (`-e`), detailed comparisons (`-c`), and 5 minute timeout for EProver (`-t 300`). **Note that running this can take up to six hours.**
+Run the following to try proving the given example problems with identity, sine and irsel selectors (`-a`), irsel variations (`-e`), detailed comparisons (`-c`), and one minute timeout for EProver (`-t 60`). **Note that running this can take up to six hours.**
 
 ```
-./irsel.sh examples/* -aceqt 60 > evaluation.txt 2>&1 # for a short summary, see evaluation_quiet.txt
-./irsel.sh examples/* -acevt 60 > evaluation.txt 2>&1 # creates a detailed report including selected axioms, see evaluation_verbose.txt
+./irsel.sh examples/* -aceqt 60 > evaluation_quiet.txt 2>&1 # for a short summary
+./irsel.sh examples/* -acevt 60 > evaluation_verbose.txt 2>&1 # creates a detailed report including selected axioms
 ```
