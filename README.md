@@ -15,7 +15,7 @@ To set up irsel, choose one of the following options.
 
 ### Usage
 
-Run irsel with `./irsel.sh <args>` or, in cmd.exe on Windows, `./irsel <args>` (`-h` for help).
+Run irsel with `./irsel.sh <args>` or, in cmd.exe on Windows, `irsel <args>` (`-h` for help).
 
 To prove theorems from [TPTP](http://www.tptp.org/), [download TPTP](http://www.tptp.org/TPTP/Distribution/TPTP-v7.3.0.tgz) to the `tptp` folder and run `./irsel.sh tptp/Problems/<some problem>`.
 
