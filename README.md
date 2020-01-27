@@ -2,7 +2,7 @@
 
 **Information Retrieval axiom SELection**
 
-irsel is an experimental algorithm to perform [axiom selection for large theory reasoning](http://doi.org/10.1007/978-3-642-22438-6_23).
+irsel is an experimental algorithm to perform [axiom selection for large theory reasoning](http://doi.org/10.1007/978-3-642-22438-6_23) ([slides](slides.pdf)).
 It represents axioms as TF-IDF vectors, optionally applies [LSI](https://www.cs.bham.ac.uk/~pxt/IDA/lsa_ind.pdf) and repeatedly selects the best axioms in terms of cosine similarity to the conjecture.
 
 ### Setup
